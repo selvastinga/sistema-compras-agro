@@ -1,0 +1,31 @@
+{
+  "name": "sistema-compras-agro",
+  "version": "1.0.0",
+  "description": "Sistema de Pedidos de Compras y Control Presupuestario - Depto. Ciencias Agropecuarias (FICA - UNSL)",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "start:server": "cd server && node index.js",
+    "dev:server": "cd server && node index.js",
+    "dev:client": "cd client && npm run dev",
+    "build:client": "cd client && npm run build",
+    "build": "cd client && npm run build",
+    "install:all": "cd server && npm install && cd ../client && npm install"
+  },
+  "keywords": [
+    "compras",
+    "presupuesto",
+    "fica",
+    "unsl",
+    "agropecuarias"
+  ],
+  "author": "FICA - UNSL",
+  "license": "ISC",
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "pg": "^8.23.0"
+  }
+}

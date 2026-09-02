@@ -1,0 +1,12 @@
+node_modules/
+client/node_modules/
+server/node_modules/
+client/dist/
+.env
+.env.local
+server/compras_agro.db
+server/compras_agro.db-journal
+server/compras_agro.db-wal
+server/compras_agro.db-shm
+.DS_Store
+Thumbs.db
