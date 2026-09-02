@@ -4,9 +4,7 @@ import {
   Lock, 
   User, 
   KeyRound, 
-  CheckCircle2, 
   AlertCircle, 
-  UserCheck, 
   X, 
   ArrowRight,
   Info,
@@ -40,12 +38,6 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleQuickSelect = (userKey, defaultPass) => {
-    setUsername(userKey);
-    setPassword(defaultPass);
-    setError(null);
   };
 
   return (
@@ -116,7 +108,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="director / vicedir / dpto"
+                  placeholder="Ingresa tu usuario"
                   className="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600 outline-none transition-all"
                   required
                   autoFocus
@@ -144,57 +136,9 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-
-            {/* Quick Helper: Cuentas autorizadas */}
-            <div className="pt-1">
-              <div className="text-[11px] font-bold text-slate-500 uppercase mb-1.5 flex items-center gap-1">
-                <UserCheck className="w-3.5 h-3.5 text-emerald-700" />
-                Usuarios de Acceso Autorizados:
-              </div>
-              <div className="grid grid-cols-3 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => handleQuickSelect('director', 'Omar26+')}
-                  className={`p-2 text-center rounded-xl text-xs transition-colors border ${
-                    username.toLowerCase() === 'director'
-                      ? 'bg-emerald-50 border-emerald-400 text-emerald-950 font-bold'
-                      : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
-                  }`}
-                >
-                  <div className="font-bold text-slate-900 text-[11px]">director</div>
-                  <div className="text-[10px] text-slate-500">Omar</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleQuickSelect('vicedir', 'Marisa26+')}
-                  className={`p-2 text-center rounded-xl text-xs transition-colors border ${
-                    username.toLowerCase() === 'vicedir'
-                      ? 'bg-emerald-50 border-emerald-400 text-emerald-950 font-bold'
-                      : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
-                  }`}
-                >
-                  <div className="font-bold text-slate-900 text-[11px]">vicedir</div>
-                  <div className="text-[10px] text-slate-500">Marisa</div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleQuickSelect('dpto', 'Selva26+')}
-                  className={`p-2 text-center rounded-xl text-xs transition-colors border ${
-                    username.toLowerCase() === 'dpto'
-                      ? 'bg-emerald-50 border-emerald-400 text-emerald-950 font-bold'
-                      : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
-                  }`}
-                >
-                  <div className="font-bold text-slate-900 text-[11px]">dpto</div>
-                  <div className="text-[10px] text-slate-500">Selva</div>
                 </button>
               </div>
             </div>
@@ -204,7 +148,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess }) {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 bg-emerald-800 hover:bg-emerald-900 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all text-xs flex items-center justify-center gap-2"
+                className="w-full py-3 bg-emerald-800 hover:bg-emerald-900 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all text-xs flex items-center justify-center gap-2 cursor-pointer"
               >
                 {loading ? (
                   <>
