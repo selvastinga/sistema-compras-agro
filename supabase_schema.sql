@@ -157,12 +157,16 @@ INSERT INTO rubros (id, name, description, color, is_active) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- 5. Usuarios Administradores (director: Omar26+, vicedir: Marisa26+, dpto: Selva26+)
--- Hashes generados con PBKDF2 SHA512 (10,000 iteraciones)
-INSERT INTO admin_users (id, username, name, password_hash, salt, is_active) VALUES
-  (1, 'director', 'Director (Omar)', 'd130a08e0018a1a3e6c0c2a52dfdb0bb2a79237eeae7fc995963f68ea4c7590886c990b79ec5c8db6705ce82d921379f82956f1ff8109bfbc9ef7f985b14be26', 'c4974868f7734bbd85da1952e420658a', 1),
-  (2, 'vicedir', 'Vicedirectora (Marisa)', 'd1999dae274a274df22be72a0c644d564bbddb742a03cf65bc3e284a148a04b8686f37ee9bf9fb45778844ba54c153835697669d0d3c0ec405c93aa7fb2cfa1c', '82046fa4841ec2ff715a31e847385966', 1),
-  (3, 'dpto', 'Departamento (Selva)', '4fe8bf45d29d380e2d312bc85ec77651a2d488102a43b1c6d3bc89a74aa914f6b6eb74a69ec4c5fe4a39031a0179a405615707742d45c50c005b630e2cb0ff45', '77e8a939462b489aeb51365445ea4c82', 1)
-ON CONFLICT (id) DO NOTHING;
+-- Hashes verificados generados con PBKDF2 SHA512 (10,000 iteraciones)
+INSERT INTO admin_users (username, name, password_hash, salt, is_active) VALUES
+  ('director', 'Director (Omar)', '38e01f08b06fb16e0e9d59ee876cbfcf7adc4aa248c9a98465ec85a14633e8351c7ec175e478da6b6386393985b82d81119e01e3cd5d70692d3f52ec059bbf33', '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d', 1),
+  ('vicedir', 'Vicedirectora (Marisa)', '3c39c9078f3f6693ff404eb6eb5c88a08e660e66f6243edb17f6d404e8b5b47597beace20b9a71f103c375f0acfdff53c98d11063aa567eb1875de58d7712831', '2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d1a', 1),
+  ('dpto', 'Departamento (Selva)', '4e8adb49e399e23db334e1665496ba79455e92bb3f463552ee7a6ae741b0afebe83ab9f8df61b19a36a40e9a4e89b77c65dc05474d8e4dfcc822c62facafe2a5', '3c4d5e6f7a8b9c0d1e2f3a4b5c6d1a2b', 1)
+ON CONFLICT (username) DO UPDATE SET
+  name = EXCLUDED.name,
+  password_hash = EXCLUDED.password_hash,
+  salt = EXCLUDED.salt,
+  is_active = 1;
 
 -- Reiniciar secuencias de auto-incremento
 SELECT setval(pg_get_serial_sequence('areas', 'id'), COALESCE(MAX(id), 1)) FROM areas;
