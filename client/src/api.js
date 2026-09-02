@@ -10,18 +10,35 @@ function getAuthHeaders() {
   return headers;
 }
 
+// Safe fetch JSON wrapper
+async function fetchJson(url, options = {}) {
+  try {
+    const res = await fetch(url, options);
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(`Error en el servidor (${res.status})`);
+    }
+    if (!res.ok) {
+      throw new Error(data.message || data.error || `Error ${res.status}`);
+    }
+    return data;
+  } catch (err) {
+    console.error(`Fetch error for ${url}:`, err.message);
+    throw err;
+  }
+}
+
 export const api = {
   // Auth & Admin Accounts
   login: async (username, password) => {
-    const res = await fetch(`${API_BASE}/auth/login`, {
+    const data = await fetchJson(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password })
     });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.message || data.error || 'Error al iniciar sesión');
-    }
     if (data.token) {
       localStorage.setItem('compras_agro_token', data.token);
       localStorage.setItem('compras_agro_user', JSON.stringify(data.user));
@@ -41,210 +58,198 @@ export const api = {
     localStorage.removeItem('compras_agro_user');
   },
   getMe: async () => {
-    const res = await fetch(`${API_BASE}/auth/me`, {
+    return fetchJson(`${API_BASE}/auth/me`, {
       headers: getAuthHeaders()
     });
-    if (!res.ok) throw new Error('Sesión no válida');
-    return res.json();
   },
   getAdmins: async () => {
-    const res = await fetch(`${API_BASE}/auth/admins`);
-    return res.json();
+    try {
+      return await fetchJson(`${API_BASE}/auth/admins`);
+    } catch {
+      return [];
+    }
   },
   updateAdmins: async (admins) => {
-    const res = await fetch(`${API_BASE}/auth/admins`, {
+    return fetchJson(`${API_BASE}/auth/admins`, {
       method: 'PUT',
       headers: getAuthHeaders(),
       body: JSON.stringify({ admins })
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || data.error || 'Error actualizando administradores');
-    return data;
   },
 
   // Years & Budgets
   getYears: async () => {
-    const res = await fetch(`${API_BASE}/years`);
-    return res.json();
+    try {
+      const data = await fetchJson(`${API_BASE}/years`);
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [{ year: 2026, initial_budget: 0, description: 'Presupuesto 2026', is_active: 1 }];
+    }
   },
   createYear: async (data) => {
-    const res = await fetch(`${API_BASE}/years`, {
+    return fetchJson(`${API_BASE}/years`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify(data)
     });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.message || result.error || 'Error creando año');
-    return result;
   },
   updateYear: async (year, data) => {
-    const res = await fetch(`${API_BASE}/years/${year}`, {
+    return fetchJson(`${API_BASE}/years/${year}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
       body: JSON.stringify(data)
     });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.message || result.error || 'Error actualizando año');
-    return result;
   },
   getBudgets: async (year) => {
-    const res = await fetch(`${API_BASE}/budgets?year=${year}`);
-    return res.json();
+    try {
+      return await fetchJson(`${API_BASE}/budgets?year=${year}`);
+    } catch {
+      return {
+        year: { year: year || 2026, initial_budget: 0 },
+        allocations: [],
+        totals: { department_budget: 0, total_allocated: 0, total_spent: 0, department_remaining: 0, department_spent_percentage: 0 }
+      };
+    }
   },
   updateBudgets: async (year, data) => {
-    const res = await fetch(`${API_BASE}/budgets/${year}`, {
+    return fetchJson(`${API_BASE}/budgets/${year}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
       body: JSON.stringify(data)
     });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.message || result.error || 'Error actualizando presupuestos');
-    return result;
   },
 
   // Areas
   getAreas: async () => {
-    const res = await fetch(`${API_BASE}/areas`);
-    return res.json();
+    try {
+      const data = await fetchJson(`${API_BASE}/areas`);
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
   },
   createArea: async (data) => {
-    const res = await fetch(`${API_BASE}/areas`, {
+    return fetchJson(`${API_BASE}/areas`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify(data)
     });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.message || result.error || 'Error creando área');
-    return result;
   },
   updateArea: async (id, data) => {
-    const res = await fetch(`${API_BASE}/areas/${id}`, {
+    return fetchJson(`${API_BASE}/areas/${id}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
       body: JSON.stringify(data)
     });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.message || result.error || 'Error actualizando área');
-    return result;
   },
   deleteArea: async (id) => {
-    const res = await fetch(`${API_BASE}/areas/${id}`, {
+    return fetchJson(`${API_BASE}/areas/${id}`, {
       method: 'DELETE',
       headers: getAuthHeaders()
     });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.message || result.error || 'Error eliminando área');
-    return result;
   },
 
   // Rubros
   getRubros: async () => {
-    const res = await fetch(`${API_BASE}/rubros`);
-    return res.json();
+    try {
+      const data = await fetchJson(`${API_BASE}/rubros`);
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
   },
   createRubro: async (data) => {
-    const res = await fetch(`${API_BASE}/rubros`, {
+    return fetchJson(`${API_BASE}/rubros`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify(data)
     });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.message || result.error || 'Error creando rubro');
-    return result;
   },
   updateRubro: async (id, data) => {
-    const res = await fetch(`${API_BASE}/rubros/${id}`, {
+    return fetchJson(`${API_BASE}/rubros/${id}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
       body: JSON.stringify(data)
     });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.message || result.error || 'Error actualizando rubro');
-    return result;
   },
   deleteRubro: async (id) => {
-    const res = await fetch(`${API_BASE}/rubros/${id}`, {
+    return fetchJson(`${API_BASE}/rubros/${id}`, {
       method: 'DELETE',
       headers: getAuthHeaders()
     });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.message || result.error || 'Error eliminando rubro');
-    return result;
   },
 
   // Requests
   getRequests: async (filters = {}) => {
-    const params = new URLSearchParams();
-    if (filters.year) params.append('year', filters.year);
-    if (filters.area_id) params.append('area_id', filters.area_id);
-    if (filters.rubro_id) params.append('rubro_id', filters.rubro_id);
-    if (filters.modality) params.append('modality', filters.modality);
-    if (filters.status) params.append('status', filters.status);
-    if (filters.search) params.append('search', filters.search);
+    try {
+      const params = new URLSearchParams();
+      if (filters.year) params.append('year', filters.year);
+      if (filters.area_id) params.append('area_id', filters.area_id);
+      if (filters.rubro_id) params.append('rubro_id', filters.rubro_id);
+      if (filters.modality) params.append('modality', filters.modality);
+      if (filters.status) params.append('status', filters.status);
+      if (filters.search) params.append('search', filters.search);
 
-    const res = await fetch(`${API_BASE}/requests?${params.toString()}`);
-    return res.json();
+      const data = await fetchJson(`${API_BASE}/requests?${params.toString()}`);
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
   },
   getRequest: async (id) => {
-    const res = await fetch(`${API_BASE}/requests/${id}`);
-    return res.json();
+    return fetchJson(`${API_BASE}/requests/${id}`);
   },
   createRequest: async (data) => {
-    const res = await fetch(`${API_BASE}/requests`, {
+    return fetchJson(`${API_BASE}/requests`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify(data)
     });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.message || result.error || 'Error creando pedido');
-    return result;
   },
   updateRequest: async (id, data) => {
-    const res = await fetch(`${API_BASE}/requests/${id}`, {
+    return fetchJson(`${API_BASE}/requests/${id}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
       body: JSON.stringify(data)
     });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.message || result.error || 'Error actualizando pedido');
-    return result;
   },
   deleteRequest: async (id) => {
-    const res = await fetch(`${API_BASE}/requests/${id}`, {
+    return fetchJson(`${API_BASE}/requests/${id}`, {
       method: 'DELETE',
       headers: getAuthHeaders()
     });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.message || result.error || 'Error eliminando pedido');
-    return result;
   },
 
   // Purchases
   purchaseItem: async (requestId, itemId, data) => {
-    const res = await fetch(`${API_BASE}/requests/${requestId}/items/${itemId}/purchase`, {
+    return fetchJson(`${API_BASE}/requests/${requestId}/items/${itemId}/purchase`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify(data)
     });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.message || result.error || 'Error registrando compra');
-    return result;
   },
   purchaseAllItems: async (requestId, data) => {
-    const res = await fetch(`${API_BASE}/requests/${requestId}/purchase-all`, {
+    return fetchJson(`${API_BASE}/requests/${requestId}/purchase-all`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify(data)
     });
-    const result = await res.json();
-    if (!res.ok) throw new Error(result.message || result.error || 'Error registrando compra completa');
-    return result;
   },
 
   // Stats
   getStats: async (year) => {
-    const res = await fetch(`${API_BASE}/stats?year=${year}`);
-    return res.json();
+    try {
+      return await fetchJson(`${API_BASE}/stats?year=${year}`);
+    } catch {
+      return {
+        year: { year: year || 2026, initial_budget: 0 },
+        summary: { initial_budget: 0, total_spent: 0, remaining_budget: 0, total_pending_estimated: 0, execution_rate: 0 },
+        by_area: [],
+        by_rubro: [],
+        by_modality: [],
+        by_status: []
+      };
+    }
   },
 
   // Export CSV URL

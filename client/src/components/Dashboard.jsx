@@ -28,7 +28,17 @@ export default function Dashboard({
     );
   }
 
-  const { summary, by_area, by_rubro, by_modality, by_status } = stats;
+  const summary = stats?.summary || {
+    initial_budget: 0,
+    total_spent: 0,
+    remaining_budget: 0,
+    total_pending_estimated: 0,
+    execution_rate: 0
+  };
+  const by_area = Array.isArray(stats?.by_area) ? stats.by_area : [];
+  const by_rubro = Array.isArray(stats?.by_rubro) ? stats.by_rubro : [];
+  const by_modality = Array.isArray(stats?.by_modality) ? stats.by_modality : [];
+  const by_status = Array.isArray(stats?.by_status) ? stats.by_status : [];
 
   const formatCurrency = (val) => {
     return new Intl.NumberFormat('es-AR', {
@@ -42,8 +52,10 @@ export default function Dashboard({
     return new Intl.NumberFormat('es-AR').format(val || 0);
   };
 
-  // Find max rubro spent for relative bar widths
-  const maxRubroTotal = Math.max(...by_rubro.map(r => Math.max(r.total_gastado, r.total_estimado)), 1);
+  // Find max rubro spent for relative bar widths safely
+  const maxRubroTotal = by_rubro.length > 0
+    ? Math.max(...by_rubro.map(r => Math.max(parseFloat(r.total_gastado) || 0, parseFloat(r.total_estimado) || 0)), 1)
+    : 1;
 
   return (
     <div className="space-y-6 pb-12 animate-in fade-in duration-300">

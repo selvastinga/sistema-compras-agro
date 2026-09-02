@@ -6,6 +6,7 @@ const { query, queryRow, execute, executeInsert, isPostgres } = require('./db');
 const { createSession, authenticateUser, requireAdminAuth, hashPassword, generateSalt } = require('./auth');
 
 const app = express();
+const router = express.Router();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
@@ -46,12 +47,17 @@ async function updateRequestStatus(requestId) {
   await execute('UPDATE purchase_requests SET estado = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newStatus, requestId]);
 }
 
+// Health check endpoint
+router.get('/health', (req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString(), isPostgres });
+});
+
 // ==========================================
 // 0. AUTHENTICATION & ADMIN USERS
 // ==========================================
 
-// POST /api/auth/login (Username + Password)
-app.post('/api/auth/login', async (req, res) => {
+// POST /auth/login (Username + Password)
+router.post('/auth/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) {
@@ -76,13 +82,13 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// GET /api/auth/me (Check current session)
-app.get('/api/auth/me', requireAdminAuth, (req, res) => {
+// GET /auth/me (Check current session)
+router.get('/auth/me', requireAdminAuth, (req, res) => {
   res.json({ user: req.user });
 });
 
-// POST /api/auth/logout
-app.post('/api/auth/logout', async (req, res) => {
+// POST /auth/logout
+router.post('/auth/logout', async (req, res) => {
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
@@ -91,8 +97,8 @@ app.post('/api/auth/logout', async (req, res) => {
   res.json({ message: 'Sesión cerrada exitosamente' });
 });
 
-// GET /api/auth/admins (List the 3 authorized admin accounts - public/admin)
-app.get('/api/auth/admins', async (req, res) => {
+// GET /auth/admins (List the 3 authorized admin accounts - public/admin)
+router.get('/auth/admins', async (req, res) => {
   try {
     const admins = await query('SELECT id, username, name, is_active FROM admin_users ORDER BY id ASC');
     res.json(admins);
@@ -101,8 +107,8 @@ app.get('/api/auth/admins', async (req, res) => {
   }
 });
 
-// PUT /api/auth/admins (Update passwords/names for the 3 accounts - requires Admin)
-app.put('/api/auth/admins', requireAdminAuth, async (req, res) => {
+// PUT /auth/admins (Update passwords/names for the 3 accounts - requires Admin)
+router.put('/auth/admins', requireAdminAuth, async (req, res) => {
   try {
     const { admins } = req.body;
     if (!Array.isArray(admins) || admins.length === 0) {
@@ -141,8 +147,8 @@ app.put('/api/auth/admins', requireAdminAuth, async (req, res) => {
 // 1. FISCAL YEARS & BUDGETS
 // ==========================================
 
-// GET /api/years (PUBLIC)
-app.get('/api/years', async (req, res) => {
+// GET /years (PUBLIC)
+router.get('/years', async (req, res) => {
   try {
     const years = await query(`
       SELECT 
@@ -171,7 +177,7 @@ app.get('/api/years', async (req, res) => {
       ORDER BY y.year DESC
     `);
 
-    const result = years.map(y => {
+    const result = (years || []).map(y => {
       const initBudget = parseFloat(y.initial_budget) || 0;
       const spent = parseFloat(y.total_spent) || 0;
       return {
@@ -190,8 +196,8 @@ app.get('/api/years', async (req, res) => {
   }
 });
 
-// POST /api/years (ADMIN ONLY)
-app.post('/api/years', requireAdminAuth, async (req, res) => {
+// POST /years (ADMIN ONLY)
+router.post('/years', requireAdminAuth, async (req, res) => {
   try {
     const { year, initial_budget, description } = req.body;
     if (!year || isNaN(year)) {
@@ -211,10 +217,10 @@ app.post('/api/years', requireAdminAuth, async (req, res) => {
 
     // Create default area allocations
     const activeAreas = await query('SELECT id FROM areas WHERE is_active = 1');
-    const count = activeAreas.length || 1;
+    const count = (activeAreas && activeAreas.length) || 1;
     const defaultPct = Math.round((100 / count) * 100) / 100;
 
-    for (const area of activeAreas) {
+    for (const area of (activeAreas || [])) {
       const allocated = (budget * defaultPct) / 100;
       await execute(`
         INSERT INTO area_budgets (year, area_id, percentage, allocated_amount)
@@ -229,8 +235,8 @@ app.post('/api/years', requireAdminAuth, async (req, res) => {
   }
 });
 
-// PUT /api/years/:year (ADMIN ONLY)
-app.put('/api/years/:year', requireAdminAuth, async (req, res) => {
+// PUT /years/:year (ADMIN ONLY)
+router.put('/years/:year', requireAdminAuth, async (req, res) => {
   try {
     const year = parseInt(req.params.year, 10);
     const { initial_budget, description, is_active } = req.body;
@@ -239,9 +245,8 @@ app.put('/api/years/:year', requireAdminAuth, async (req, res) => {
       const budget = parseFloat(initial_budget) || 0;
       await execute('UPDATE fiscal_years SET initial_budget = ?, description = COALESCE(?, description), updated_at = CURRENT_TIMESTAMP WHERE year = ?', [budget, description, year]);
       
-      // Update allocated amounts proportionally
       const allocations = await query('SELECT area_id, percentage FROM area_budgets WHERE year = ?', [year]);
-      for (const a of allocations) {
+      for (const a of (allocations || [])) {
         const amt = (budget * (parseFloat(a.percentage) || 0)) / 100;
         await execute('UPDATE area_budgets SET allocated_amount = ?, updated_at = CURRENT_TIMESTAMP WHERE year = ? AND area_id = ?', [amt, year, a.area_id]);
       }
@@ -257,22 +262,24 @@ app.put('/api/years/:year', requireAdminAuth, async (req, res) => {
   }
 });
 
-// GET /api/budgets (PUBLIC)
-app.get('/api/budgets', async (req, res) => {
+// GET /budgets (PUBLIC)
+router.get('/budgets', async (req, res) => {
   try {
     const year = parseInt(req.query.year, 10) || new Date().getFullYear();
 
-    const yearInfo = await queryRow('SELECT * FROM fiscal_years WHERE year = ?', [year]);
+    let yearInfo = await queryRow('SELECT * FROM fiscal_years WHERE year = ?', [year]);
     if (!yearInfo) {
-      return res.status(404).json({ error: 'Ejercicio fiscal no encontrado' });
+      // Create year automatically if missing
+      await execute('INSERT INTO fiscal_years (year, initial_budget, description, is_active) VALUES (?, 0, ?, 1) ON CONFLICT (year) DO NOTHING', [year, `Presupuesto Anual ${year}`]);
+      yearInfo = { year, initial_budget: 0, description: `Presupuesto Anual ${year}`, is_active: 1 };
     }
 
     // Ensure all active areas have a record in area_budgets
     const activeAreas = await query('SELECT id FROM areas WHERE is_active = 1');
-    for (const a of activeAreas) {
+    for (const a of (activeAreas || [])) {
       const exists = await queryRow('SELECT id FROM area_budgets WHERE year = ? AND area_id = ?', [year, a.id]);
       if (!exists) {
-        await execute('INSERT INTO area_budgets (year, area_id, percentage, allocated_amount) VALUES (?, ?, 0, 0)', [year, a.id]);
+        await execute('INSERT INTO area_budgets (year, area_id, percentage, allocated_amount) VALUES (?, ?, 0, 0) ON CONFLICT (year, area_id) DO NOTHING', [year, a.id]);
       }
     }
 
@@ -309,7 +316,7 @@ app.get('/api/budgets', async (req, res) => {
       ORDER BY a.display_order ASC, a.name ASC
     `, [year]);
 
-    const enriched = allocations.map(a => {
+    const enriched = (allocations || []).map(a => {
       const allocated = parseFloat(a.allocated_amount) || 0;
       const spent = parseFloat(a.total_spent) || 0;
       const remaining = allocated - spent;
@@ -350,8 +357,8 @@ app.get('/api/budgets', async (req, res) => {
   }
 });
 
-// PUT /api/budgets/:year (ADMIN ONLY)
-app.put('/api/budgets/:year', requireAdminAuth, async (req, res) => {
+// PUT /budgets/:year (ADMIN ONLY)
+router.put('/budgets/:year', requireAdminAuth, async (req, res) => {
   try {
     const year = parseInt(req.params.year, 10);
     const { initial_budget, allocations } = req.body;
@@ -401,18 +408,18 @@ app.put('/api/budgets/:year', requireAdminAuth, async (req, res) => {
 // 2. AREAS MANAGEMENT
 // ==========================================
 
-// GET /api/areas (PUBLIC)
-app.get('/api/areas', async (req, res) => {
+// GET /areas (PUBLIC)
+router.get('/areas', async (req, res) => {
   try {
     const areas = await query('SELECT * FROM areas ORDER BY display_order ASC, name ASC');
-    res.json(areas);
+    res.json(areas || []);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// POST /api/areas (ADMIN ONLY)
-app.post('/api/areas', requireAdminAuth, async (req, res) => {
+// POST /areas (ADMIN ONLY)
+router.post('/areas', requireAdminAuth, async (req, res) => {
   try {
     const { name, code, color } = req.body;
     if (!name || !name.trim()) {
@@ -432,12 +439,12 @@ app.post('/api/areas', requireAdminAuth, async (req, res) => {
 
     const newAreaId = info.lastInsertRowid;
 
-    // Create budget allocations for all existing fiscal years with 0%
     const years = await query('SELECT year FROM fiscal_years');
-    for (const y of years) {
+    for (const y of (years || [])) {
       await execute(`
         INSERT INTO area_budgets (year, area_id, percentage, allocated_amount)
         VALUES (?, ?, 0, 0)
+        ON CONFLICT (year, area_id) DO NOTHING
       `, [y.year, newAreaId]);
     }
 
@@ -449,8 +456,8 @@ app.post('/api/areas', requireAdminAuth, async (req, res) => {
   }
 });
 
-// PUT /api/areas/:id (ADMIN ONLY)
-app.put('/api/areas/:id', requireAdminAuth, async (req, res) => {
+// PUT /areas/:id (ADMIN ONLY)
+router.put('/areas/:id', requireAdminAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { name, code, color, is_active, display_order } = req.body;
@@ -486,8 +493,8 @@ app.put('/api/areas/:id', requireAdminAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/areas/:id (ADMIN ONLY)
-app.delete('/api/areas/:id', requireAdminAuth, async (req, res) => {
+// DELETE /areas/:id (ADMIN ONLY)
+router.delete('/areas/:id', requireAdminAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const reqCount = await queryRow('SELECT COUNT(*) as c FROM purchase_requests WHERE area_id = ?', [id]);
@@ -509,18 +516,18 @@ app.delete('/api/areas/:id', requireAdminAuth, async (req, res) => {
 // 3. RUBROS MANAGEMENT
 // ==========================================
 
-// GET /api/rubros (PUBLIC)
-app.get('/api/rubros', async (req, res) => {
+// GET /rubros (PUBLIC)
+router.get('/rubros', async (req, res) => {
   try {
     const rubros = await query('SELECT * FROM rubros ORDER BY name ASC');
-    res.json(rubros);
+    res.json(rubros || []);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// POST /api/rubros (ADMIN ONLY)
-app.post('/api/rubros', requireAdminAuth, async (req, res) => {
+// POST /rubros (ADMIN ONLY)
+router.post('/rubros', requireAdminAuth, async (req, res) => {
   try {
     const { name, description, color } = req.body;
     if (!name || !name.trim()) {
@@ -542,8 +549,8 @@ app.post('/api/rubros', requireAdminAuth, async (req, res) => {
   }
 });
 
-// PUT /api/rubros/:id (ADMIN ONLY)
-app.put('/api/rubros/:id', requireAdminAuth, async (req, res) => {
+// PUT /rubros/:id (ADMIN ONLY)
+router.put('/rubros/:id', requireAdminAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const { name, description, color, is_active } = req.body;
@@ -572,8 +579,8 @@ app.put('/api/rubros/:id', requireAdminAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/rubros/:id (ADMIN ONLY)
-app.delete('/api/rubros/:id', requireAdminAuth, async (req, res) => {
+// DELETE /rubros/:id (ADMIN ONLY)
+router.delete('/rubros/:id', requireAdminAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const reqCount = await queryRow('SELECT COUNT(*) as c FROM purchase_requests WHERE rubro_id = ?', [id]);
@@ -594,8 +601,8 @@ app.delete('/api/rubros/:id', requireAdminAuth, async (req, res) => {
 // 4. PURCHASE REQUESTS & ITEMS
 // ==========================================
 
-// GET /api/requests (PUBLIC)
-app.get('/api/requests', async (req, res) => {
+// GET /requests (PUBLIC)
+router.get('/requests', async (req, res) => {
   try {
     const { year, area_id, rubro_id, modality, status, search } = req.query;
 
@@ -673,15 +680,15 @@ app.get('/api/requests', async (req, res) => {
     queryStr += ' ORDER BY pr.fecha_solicitud DESC, pr.id DESC';
 
     const requests = await query(queryStr, params);
-    res.json(requests);
+    res.json(requests || []);
   } catch (error) {
     console.error('Error fetching requests:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// GET /api/requests/:id (PUBLIC)
-app.get('/api/requests/:id', async (req, res) => {
+// GET /requests/:id (PUBLIC)
+router.get('/requests/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const request = await queryRow(`
@@ -705,13 +712,13 @@ app.get('/api/requests/:id', async (req, res) => {
     const items = await query('SELECT * FROM request_items WHERE request_id = ? ORDER BY renglon_numero ASC', [id]);
     const vendors = await query('SELECT * FROM suggested_vendors WHERE request_id = ? ORDER BY id ASC', [id]);
 
-    const totalEstimado = items.reduce((sum, item) => sum + (parseFloat(item.precio_estimado_total) || 0), 0);
-    const totalComprado = items.reduce((sum, item) => sum + (item.estado_item === 'Comprado' ? (parseFloat(item.precio_real_total) || 0) : 0), 0);
+    const totalEstimado = (items || []).reduce((sum, item) => sum + (parseFloat(item.precio_estimado_total) || 0), 0);
+    const totalComprado = (items || []).reduce((sum, item) => sum + (item.estado_item === 'Comprado' ? (parseFloat(item.precio_real_total) || 0) : 0), 0);
 
     res.json({
       ...request,
-      items,
-      vendors,
+      items: items || [],
+      vendors: vendors || [],
       total_estimado: totalEstimado,
       total_comprado: totalComprado
     });
@@ -721,8 +728,8 @@ app.get('/api/requests/:id', async (req, res) => {
   }
 });
 
-// POST /api/requests (ADMIN ONLY)
-app.post('/api/requests', requireAdminAuth, async (req, res) => {
+// POST /requests (ADMIN ONLY)
+router.post('/requests', requireAdminAuth, async (req, res) => {
   try {
     const {
       year,
@@ -817,8 +824,8 @@ app.post('/api/requests', requireAdminAuth, async (req, res) => {
   }
 });
 
-// PUT /api/requests/:id (ADMIN ONLY)
-app.put('/api/requests/:id', requireAdminAuth, async (req, res) => {
+// PUT /requests/:id (ADMIN ONLY)
+router.put('/requests/:id', requireAdminAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const {
@@ -874,7 +881,7 @@ app.put('/api/requests/:id', requireAdminAuth, async (req, res) => {
 
     if (Array.isArray(items)) {
       const existingItems = await query('SELECT * FROM request_items WHERE request_id = ?', [id]);
-      const existingMap = new Map(existingItems.map(i => [i.id, i]));
+      const existingMap = new Map((existingItems || []).map(i => [i.id, i]));
 
       await execute('DELETE FROM request_items WHERE request_id = ?', [id]);
 
@@ -940,8 +947,8 @@ app.put('/api/requests/:id', requireAdminAuth, async (req, res) => {
   }
 });
 
-// DELETE /api/requests/:id (ADMIN ONLY)
-app.delete('/api/requests/:id', requireAdminAuth, async (req, res) => {
+// DELETE /requests/:id (ADMIN ONLY)
+router.delete('/requests/:id', requireAdminAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     await execute('DELETE FROM request_items WHERE request_id = ?', [id]);
@@ -957,8 +964,8 @@ app.delete('/api/requests/:id', requireAdminAuth, async (req, res) => {
 // 5. PURCHASING / SPENDING EXECUTION (ADMIN ONLY)
 // ==========================================
 
-// POST /api/requests/:id/items/:itemId/purchase (ADMIN ONLY)
-app.post('/api/requests/:id/items/:itemId/purchase', requireAdminAuth, async (req, res) => {
+// POST /requests/:id/items/:itemId/purchase (ADMIN ONLY)
+router.post('/requests/:id/items/:itemId/purchase', requireAdminAuth, async (req, res) => {
   try {
     const requestId = parseInt(req.params.id, 10);
     const itemId = parseInt(req.params.itemId, 10);
@@ -1016,8 +1023,8 @@ app.post('/api/requests/:id/items/:itemId/purchase', requireAdminAuth, async (re
   }
 });
 
-// POST /api/requests/:id/purchase-all (ADMIN ONLY)
-app.post('/api/requests/:id/purchase-all', requireAdminAuth, async (req, res) => {
+// POST /requests/:id/purchase-all (ADMIN ONLY)
+router.post('/requests/:id/purchase-all', requireAdminAuth, async (req, res) => {
   try {
     const requestId = parseInt(req.params.id, 10);
     const {
@@ -1028,7 +1035,7 @@ app.post('/api/requests/:id/purchase-all', requireAdminAuth, async (req, res) =>
     } = req.body;
 
     const items = await query('SELECT * FROM request_items WHERE request_id = ?', [requestId]);
-    if (items.length === 0) {
+    if (!items || items.length === 0) {
       return res.status(400).json({ error: 'No hay renglones en este pedido' });
     }
 
@@ -1081,13 +1088,13 @@ app.post('/api/requests/:id/purchase-all', requireAdminAuth, async (req, res) =>
 // 6. STATS & ANALYTICS DASHBOARD (PUBLIC)
 // ==========================================
 
-app.get('/api/stats', async (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
     const year = parseInt(req.query.year, 10) || new Date().getFullYear();
 
-    const yearData = await queryRow('SELECT * FROM fiscal_years WHERE year = ?', [year]);
+    let yearData = await queryRow('SELECT * FROM fiscal_years WHERE year = ?', [year]);
     if (!yearData) {
-      return res.status(404).json({ error: 'Ejercicio no encontrado' });
+      yearData = { year, initial_budget: 0, description: `Presupuesto Anual ${year}`, is_active: 1 };
     }
 
     // 1. By Rubro stats
@@ -1129,7 +1136,7 @@ app.get('/api/stats', async (req, res) => {
       ORDER BY a.display_order ASC, a.name ASC
     `, [year, year]);
 
-    const enrichedAreas = areaStats.map(a => {
+    const enrichedAreas = (areaStats || []).map(a => {
       const allocated = parseFloat(a.allocated_amount) || 0;
       const spent = parseFloat(a.total_gastado) || 0;
       const pending = parseFloat(a.total_pendiente) || 0;
@@ -1182,9 +1189,9 @@ app.get('/api/stats', async (req, res) => {
         execution_rate: initialBudget > 0 ? (totalSpent / initialBudget) * 100 : 0
       },
       by_area: enrichedAreas,
-      by_rubro: rubroStats,
-      by_modality: modalityStats,
-      by_status: statusStats
+      by_rubro: rubroStats || [],
+      by_modality: modalityStats || [],
+      by_status: statusStats || []
     });
   } catch (error) {
     console.error('Error fetching stats:', error);
@@ -1196,7 +1203,7 @@ app.get('/api/stats', async (req, res) => {
 // 7. EXPORT DATA (PUBLIC)
 // ==========================================
 
-app.get('/api/export', async (req, res) => {
+router.get('/export', async (req, res) => {
   try {
     const year = parseInt(req.query.year, 10) || new Date().getFullYear();
     const format = req.query.format || 'json';
@@ -1245,7 +1252,7 @@ app.get('/api/export', async (req, res) => {
       ];
 
       const csvRows = [headers.join(',')];
-      for (const row of items) {
+      for (const row of (items || [])) {
         const values = [
           row.pedido_codigo || '',
           row.ejercicio_ano || '',
@@ -1279,11 +1286,15 @@ app.get('/api/export', async (req, res) => {
       return res.send('\uFEFF' + csvRows.join('\r\n'));
     }
 
-    res.json(items);
+    res.json(items || []);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
+
+// Mount router on BOTH /api and / so any rewrite works
+app.use('/api', router);
+app.use('/', router);
 
 // Serve static frontend files if built
 const clientDistPath = path.join(__dirname, '../client/dist');
