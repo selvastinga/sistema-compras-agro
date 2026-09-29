@@ -1,0 +1,36 @@
+name: Supabase & Vercel Keep-Alive
+
+on:
+  schedule:
+    # Se ejecuta automáticamente cada 2 días a las 12:00 UTC (9:00 AM hora Argentina)
+    - cron: '0 12 */2 * *'
+  workflow_dispatch: # Permite ejecutarlo manualmente con 1 clic desde la pestaña Actions en GitHub
+
+jobs:
+  keep-alive:
+    name: Ping Keep-Alive a Supabase y Vercel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Realizar consulta Keep-Alive a la Base de Datos
+        run: |
+          echo "🔄 Enviando solicitud Keep-Alive a la API y base de datos..."
+          
+          # 1. Ping al endpoint /api/health (ejecuta una consulta SQL en Supabase)
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" "https://sistema-compras-agro.vercel.app/api/health")
+          
+          HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS" | cut -d':' -f2)
+          BODY=$(echo "$RESPONSE" | grep -v "HTTP_STATUS")
+          
+          echo "Respuesta: $BODY"
+          echo "Código HTTP: $HTTP_STATUS"
+          
+          # 2. Ping secundario al endpoint /api/years
+          echo "🔄 Realizando consulta de respaldo a /api/years..."
+          YEARS_RESPONSE=$(curl -s "https://sistema-compras-agro.vercel.app/api/years")
+          echo "Años obtenidos: $YEARS_RESPONSE"
+          
+          if [ "$HTTP_STATUS" -eq 200 ]; then
+            echo "✅ Base de datos de Supabase y Vercel ACTIVAS exitosamente. Se evitó la pausa por inactividad."
+          else
+            echo "⚠️ Estado HTTP: $HTTP_STATUS. Se ejecutó la consulta de respaldo para mantener la actividad."
+          fi

@@ -47,9 +47,21 @@ async function updateRequestStatus(requestId) {
   await execute('UPDATE purchase_requests SET estado = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newStatus, requestId]);
 }
 
-// Health check endpoint
-router.get('/health', (req, res) => {
-  res.json({ status: 'ok', time: new Date().toISOString(), isPostgres });
+// Health check endpoint (triggers real DB query for keep-alive)
+router.get('/health', async (req, res) => {
+  try {
+    const dbTest = await queryRow('SELECT COUNT(*) as count FROM areas');
+    res.json({ 
+      status: 'ok', 
+      database: 'connected',
+      areas_count: dbTest ? parseInt(dbTest.count, 10) : 0,
+      time: new Date().toISOString(), 
+      isPostgres 
+    });
+  } catch (error) {
+    console.error('Health check DB error:', error);
+    res.status(500).json({ status: 'error', error: error.message });
+  }
 });
 
 // ==========================================
