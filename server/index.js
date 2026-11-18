@@ -47,9 +47,12 @@ async function updateRequestStatus(requestId) {
   await execute('UPDATE purchase_requests SET estado = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [newStatus, requestId]);
 }
 
-// Health check endpoint (triggers real DB query for keep-alive)
+// Health check endpoint (triggers real DB read + write activity for keep-alive)
 router.get('/health', async (req, res) => {
   try {
+    // 1. Write/cleanup activity so Supabase registers active WAL transactions
+    await execute('DELETE FROM sessions WHERE expires_at < CURRENT_TIMESTAMP');
+    // 2. Read activity
     const dbTest = await queryRow('SELECT COUNT(*) as count FROM areas');
     res.json({ 
       status: 'ok', 
