@@ -8,15 +8,40 @@ const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || pro
 function getPgPool() {
   if (!pgPool && DATABASE_URL) {
     const { Pool } = require('pg');
+    // Remove sslmode from URL if present so ssl object takes precedence cleanly
+    const cleanUrl = DATABASE_URL.replace(/[?&]sslmode=[^&]+/g, '');
     pgPool = new Pool({
-      connectionString: DATABASE_URL,
+      connectionString: cleanUrl,
       ssl: { rejectUnauthorized: false },
-      connectionTimeoutMillis: 10000,
-      max: 10
+      connectionTimeoutMillis: 12000,
+      idleTimeoutMillis: 10000,
+      max: 3,
+      allowExitOnIdle: true,
+      keepAlive: true
+    });
+    pgPool.on('error', (err) => {
+      console.error('Unexpected PostgreSQL pool error:', err.message);
+      pgPool = null;
     });
     console.log('Initialized PostgreSQL Pool.');
   }
   return pgPool;
+}
+
+async function runPgQuery(pgSql, params = []) {
+  try {
+    const pool = getPgPool();
+    return await pool.query(pgSql, params);
+  } catch (err) {
+    console.error('PG Query error, resetting pool:', err.message);
+    pgPool = null;
+    if (err.message && (err.message.includes('timeout') || err.message.includes('terminated') || err.message.includes('ENOTFOUND') || err.message.includes('ECONNREFUSED'))) {
+      throw new Error(
+        'La base de datos de Supabase no responde (Timeout). Por favor ingresá a supabase.com, verificá que el proyecto no esté Pausado (botón "Restore project") y que haya terminado de iniciar.'
+      );
+    }
+    throw err;
+  }
 }
 
 function getSqliteDb() {
@@ -43,10 +68,9 @@ function convertSqlForPg(sql) {
 
 // Unified Query interface (Async)
 async function query(sql, params = []) {
-  const pool = getPgPool();
-  if (pool) {
+  if (DATABASE_URL) {
     const pgSql = convertSqlForPg(sql);
-    const res = await pool.query(pgSql, params);
+    const res = await runPgQuery(pgSql, params);
     return res.rows;
   }
   
@@ -59,10 +83,9 @@ async function query(sql, params = []) {
 }
 
 async function queryRow(sql, params = []) {
-  const pool = getPgPool();
-  if (pool) {
+  if (DATABASE_URL) {
     const pgSql = convertSqlForPg(sql);
-    const res = await pool.query(pgSql, params);
+    const res = await runPgQuery(pgSql, params);
     return res.rows[0] || null;
   }
 
@@ -75,10 +98,9 @@ async function queryRow(sql, params = []) {
 }
 
 async function execute(sql, params = []) {
-  const pool = getPgPool();
-  if (pool) {
+  if (DATABASE_URL) {
     const pgSql = convertSqlForPg(sql);
-    const res = await pool.query(pgSql, params);
+    const res = await runPgQuery(pgSql, params);
     return { rowCount: res.rowCount };
   }
 
@@ -91,10 +113,9 @@ async function execute(sql, params = []) {
 }
 
 async function executeInsert(sql, params = []) {
-  const pool = getPgPool();
-  if (pool) {
+  if (DATABASE_URL) {
     const pgSql = convertSqlForPg(sql) + ' RETURNING id';
-    const res = await pool.query(pgSql, params);
+    const res = await runPgQuery(pgSql, params);
     return { lastInsertRowid: res.rows[0]?.id || null };
   }
 
