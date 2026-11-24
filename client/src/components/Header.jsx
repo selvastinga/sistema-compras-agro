@@ -8,6 +8,7 @@ import {
   FilePlus2, 
   FileText, 
   ShoppingBag, 
+  Briefcase,
   Settings as SettingsIcon,
   ChevronDown,
   Check,
@@ -32,7 +33,9 @@ export default function Header({
 }) {
   const [showYearModal, setShowYearModal] = useState(false);
   const [newYearVal, setNewYearVal] = useState(new Date().getFullYear() + 1);
-  const [newYearBudget, setNewYearBudget] = useState(0);
+  const [newYearBase, setNewYearBase] = useState(0);
+  const [newYearEspecial, setNewYearEspecial] = useState(0);
+  const [newYearRemanente, setNewYearRemanente] = useState(0);
   const [newYearDesc, setNewYearDesc] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -41,9 +44,15 @@ export default function Header({
     if (!newYearVal) return;
     setIsSubmitting(true);
     try {
+      const pBase = parseFloat(newYearBase) || 0;
+      const pEsp = parseFloat(newYearEspecial) || 0;
+      const pRem = parseFloat(newYearRemanente) || 0;
       await api.createYear({
         year: parseInt(newYearVal, 10),
-        initial_budget: parseFloat(newYearBudget) || 0,
+        presupuesto_base: pBase,
+        partida_especial: pEsp,
+        remanente_anterior: pRem,
+        initial_budget: pBase + pEsp + pRem,
         description: newYearDesc || `Presupuesto Anual ${newYearVal}`
       });
       await onRefreshYears();
@@ -61,6 +70,7 @@ export default function Header({
     { id: 'new-request', label: 'Cargar Pedido / Mail', icon: FilePlus2, adminOnly: true },
     { id: 'requests-list', label: 'Gestión de Pedidos', icon: FileText },
     { id: 'purchases', label: 'Ejecución de Compras', icon: ShoppingBag, adminOnly: true },
+    { id: 'viaticos', label: 'Pago de Viáticos', icon: Briefcase },
     { id: 'settings', label: 'Áreas y Presupuestos', icon: SettingsIcon },
   ];
 
@@ -246,20 +256,46 @@ export default function Header({
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
-                  Monto Total Presupuestado Inicial ($)
-                </label>
-                <input
-                  type="number"
-                  step="1000"
-                  min="0"
-                  value={newYearBudget}
-                  onChange={(e) => setNewYearBudget(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600 outline-none text-slate-800 font-semibold"
-                  placeholder="0"
-                  required
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                    Presup. Inicial ($)
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={newYearBase}
+                    onChange={(e) => setNewYearBase(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-600 outline-none text-slate-800 font-semibold text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                    Partida Especial ($)
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={newYearEspecial}
+                    onChange={(e) => setNewYearEspecial(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-600 outline-none text-slate-800 font-semibold text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                    Remanente Ant. ($)
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={newYearRemanente}
+                    onChange={(e) => setNewYearRemanente(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-600 outline-none text-slate-800 font-semibold text-xs"
+                  />
+                </div>
               </div>
 
               <div>

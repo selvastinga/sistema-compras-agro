@@ -7,11 +7,19 @@
 CREATE TABLE IF NOT EXISTS fiscal_years (
   year INTEGER PRIMARY KEY,
   initial_budget NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+  presupuesto_base NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+  partida_especial NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+  remanente_anterior NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
   description TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Migraciones por si la tabla ya existía
+ALTER TABLE fiscal_years ADD COLUMN IF NOT EXISTS presupuesto_base NUMERIC(15, 2) NOT NULL DEFAULT 0.00;
+ALTER TABLE fiscal_years ADD COLUMN IF NOT EXISTS partida_especial NUMERIC(15, 2) NOT NULL DEFAULT 0.00;
+ALTER TABLE fiscal_years ADD COLUMN IF NOT EXISTS remanente_anterior NUMERIC(15, 2) NOT NULL DEFAULT 0.00;
 
 -- 2. Tabla: Áreas del Departamento
 CREATE TABLE IF NOT EXISTS areas (
@@ -101,7 +109,22 @@ CREATE TABLE IF NOT EXISTS suggested_vendors (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 8. Tabla: Usuarios Administradores Autorizados
+-- 8. Tabla: Viáticos (Egresos por docente y área)
+CREATE TABLE IF NOT EXISTS viaticos (
+  id SERIAL PRIMARY KEY,
+  year INTEGER NOT NULL REFERENCES fiscal_years(year) ON DELETE CASCADE,
+  area_id INTEGER NOT NULL REFERENCES areas(id),
+  docente VARCHAR(255) NOT NULL,
+  destino VARCHAR(255) NOT NULL,
+  dias NUMERIC(10, 1) NOT NULL DEFAULT 1,
+  monto NUMERIC(15, 2) NOT NULL DEFAULT 0.00,
+  fecha DATE NOT NULL DEFAULT CURRENT_DATE,
+  observaciones TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 9. Tabla: Usuarios Administradores Autorizados
 CREATE TABLE IF NOT EXISTS admin_users (
   id SERIAL PRIMARY KEY,
   username VARCHAR(100) UNIQUE NOT NULL,
@@ -113,7 +136,7 @@ CREATE TABLE IF NOT EXISTS admin_users (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 9. Tabla: Sesiones Activas
+-- 10. Tabla: Sesiones Activas
 CREATE TABLE IF NOT EXISTS sessions (
   token VARCHAR(255) PRIMARY KEY,
   username VARCHAR(100) NOT NULL,
@@ -126,8 +149,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 -- ==============================================================================
 
 -- 1. Ejercicio 2026
-INSERT INTO fiscal_years (year, initial_budget, description, is_active)
-VALUES (2026, 0.00, 'Presupuesto Anual 2026 - Depto. Ciencias Agropecuarias', 1)
+INSERT INTO fiscal_years (year, initial_budget, presupuesto_base, partida_especial, remanente_anterior, description, is_active)
+VALUES (2026, 0.00, 0.00, 0.00, 0.00, 'Presupuesto Anual 2026 - Depto. Ciencias Agropecuarias', 1)
 ON CONFLICT (year) DO NOTHING;
 
 -- 2. Áreas del Departamento

@@ -35,12 +35,16 @@ export default function Settings({
 }) {
   const [activeSubTab, setActiveSubTab] = useState('budget'); // 'budget', 'areas', 'rubros', 'admins'
   
-  // Budget Allocations State
+  // Budget Allocations State (3 budget sources)
   const [budgetData, setBudgetData] = useState(null);
-  const [initialBudget, setInitialBudget] = useState(0);
+  const [presupuestoBase, setPresupuestoBase] = useState(0);
+  const [partidaEspecial, setPartidaEspecial] = useState(0);
+  const [remanenteAnterior, setRemanenteAnterior] = useState(0);
   const [allocations, setAllocations] = useState([]);
   const [isSavingBudget, setIsSavingBudget] = useState(false);
   const [budgetSuccessMsg, setBudgetSuccessMsg] = useState(null);
+
+  const initialBudget = (parseFloat(presupuestoBase) || 0) + (parseFloat(partidaEspecial) || 0) + (parseFloat(remanenteAnterior) || 0);
 
   // Admin Users State
   const [adminsList, setAdminsList] = useState([]);
@@ -62,7 +66,13 @@ export default function Settings({
     try {
       const data = await api.getBudgets(selectedYear);
       setBudgetData(data);
-      setInitialBudget(data.year?.initial_budget || 0);
+      const y = data.year || {};
+      const pBase = y.presupuesto_base !== undefined ? parseFloat(y.presupuesto_base) || 0 : (parseFloat(y.initial_budget) || 0);
+      const pEsp = parseFloat(y.partida_especial) || 0;
+      const pRem = parseFloat(y.remanente_anterior) || 0;
+      setPresupuestoBase(pBase);
+      setPartidaEspecial(pEsp);
+      setRemanenteAnterior(pRem);
       setAllocations(data.allocations || []);
     } catch (err) {
       console.error('Error loading budget:', err);
@@ -123,6 +133,24 @@ export default function Settings({
   const totalPercentageSum = allocations.reduce((sum, a) => sum + (parseFloat(a.percentage) || 0), 0);
   const totalAllocatedSum = allocations.reduce((sum, a) => sum + (parseFloat(a.allocated_amount) || 0), 0);
 
+  // Helper to update any of the 3 budget sources and recalculate area allocations
+  const handleBudgetSourceChange = (source, rawValue) => {
+    const val = parseFloat(rawValue) || 0;
+    const newBase = source === 'base' ? val : (parseFloat(presupuestoBase) || 0);
+    const newEsp = source === 'especial' ? val : (parseFloat(partidaEspecial) || 0);
+    const newRem = source === 'remanente' ? val : (parseFloat(remanenteAnterior) || 0);
+    const newTotal = newBase + newEsp + newRem;
+
+    if (source === 'base') setPresupuestoBase(rawValue);
+    if (source === 'especial') setPartidaEspecial(rawValue);
+    if (source === 'remanente') setRemanenteAnterior(rawValue);
+
+    setAllocations(prev => prev.map(a => ({
+      ...a,
+      allocated_amount: Math.round(((newTotal * (parseFloat(a.percentage) || 0)) / 100) * 100) / 100
+    })));
+  };
+
   // Save budget allocations
   const handleSaveBudget = async (e) => {
     e.preventDefault();
@@ -133,15 +161,23 @@ export default function Settings({
     setIsSavingBudget(true);
     setBudgetSuccessMsg(null);
     try {
+      const pBase = parseFloat(presupuestoBase) || 0;
+      const pEsp = parseFloat(partidaEspecial) || 0;
+      const pRem = parseFloat(remanenteAnterior) || 0;
+      const total = pBase + pEsp + pRem;
+
       await api.updateBudgets(selectedYear, {
-        initial_budget: parseFloat(initialBudget) || 0,
+        presupuesto_base: pBase,
+        partida_especial: pEsp,
+        remanente_anterior: pRem,
+        initial_budget: total,
         allocations: allocations.map(a => ({
           area_id: a.area_id,
           percentage: parseFloat(a.percentage) || 0,
           allocated_amount: parseFloat(a.allocated_amount) || 0
         }))
       });
-      setBudgetSuccessMsg('¡Presupuesto y asignaciones guardadas exitosamente!');
+      setBudgetSuccessMsg('¡Partidas presupuestarias y asignaciones por área guardadas exitosamente!');
       await loadBudgets();
       onRefreshYears();
     } catch (err) {
@@ -400,30 +436,84 @@ export default function Settings({
 
           <form onSubmit={handleSaveBudget} className="space-y-6">
             
-            {/* Monto Inicial Total */}
-            <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-100 max-w-md">
-              <label className="block text-xs font-bold text-emerald-950 uppercase mb-1">
-                Presupuesto Inicial Total del Departamento ($) *
-              </label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center font-bold text-slate-500 text-sm">$</span>
-                <input
-                  type="number"
-                  step="1000"
-                  min="0"
-                  disabled={!currentUser}
-                  value={initialBudget}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value) || 0;
-                    setInitialBudget(val);
-                    setAllocations(prev => prev.map(a => ({
-                      ...a,
-                      allocated_amount: (val * (a.percentage || 0)) / 100
-                    })));
-                  }}
-                  className="w-full pl-8 pr-3 py-2 bg-white border border-emerald-300 rounded-lg text-base font-black text-slate-900 focus:ring-2 focus:ring-emerald-600 disabled:bg-slate-100"
-                  required
-                />
+            {/* 3 Orígenes del Presupuesto Anual */}
+            <div className="bg-emerald-50/50 p-5 rounded-2xl border border-emerald-200/80 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-emerald-200/60">
+                <div>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-emerald-950">
+                    Orígenes de Fondos del Ejercicio {selectedYear}
+                  </h4>
+                  <p className="text-[11px] text-emerald-800">
+                    Registra los montos de cada partida. El presupuesto total del departamento es la suma automática de los tres ítems.
+                  </p>
+                </div>
+                <div className="bg-emerald-900 text-white px-4 py-2 rounded-xl text-right shadow-xs">
+                  <div className="text-[10px] uppercase font-bold text-emerald-200">
+                    Presupuesto Total (Suma de las 3 partidas)
+                  </div>
+                  <div className="text-lg font-black">
+                    {formatCurrency(initialBudget)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* 1. Presupuesto Inicial */}
+                <div>
+                  <label className="block text-xs font-bold text-emerald-950 uppercase mb-1">
+                    1. Presupuesto Inicial ($)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center font-bold text-slate-500 text-sm">$</span>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      disabled={!currentUser}
+                      value={presupuestoBase}
+                      onChange={(e) => handleBudgetSourceChange('base', e.target.value)}
+                      className="w-full pl-8 pr-3 py-2 bg-white border border-emerald-300 rounded-lg text-sm font-black text-slate-900 focus:ring-2 focus:ring-emerald-600 disabled:bg-slate-100"
+                    />
+                  </div>
+                </div>
+
+                {/* 2. Partida Especial */}
+                <div>
+                  <label className="block text-xs font-bold text-emerald-950 uppercase mb-1">
+                    2. Partida Especial ($)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center font-bold text-slate-500 text-sm">$</span>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      disabled={!currentUser}
+                      value={partidaEspecial}
+                      onChange={(e) => handleBudgetSourceChange('especial', e.target.value)}
+                      className="w-full pl-8 pr-3 py-2 bg-white border border-emerald-300 rounded-lg text-sm font-black text-slate-900 focus:ring-2 focus:ring-emerald-600 disabled:bg-slate-100"
+                    />
+                  </div>
+                </div>
+
+                {/* 3. Remanente Año Anterior */}
+                <div>
+                  <label className="block text-xs font-bold text-emerald-950 uppercase mb-1">
+                    3. Remanente Año Anterior ($)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center font-bold text-slate-500 text-sm">$</span>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      disabled={!currentUser}
+                      value={remanenteAnterior}
+                      onChange={(e) => handleBudgetSourceChange('remanente', e.target.value)}
+                      className="w-full pl-8 pr-3 py-2 bg-white border border-emerald-300 rounded-lg text-sm font-black text-slate-900 focus:ring-2 focus:ring-emerald-600 disabled:bg-slate-100"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -435,7 +525,7 @@ export default function Settings({
                     <th className="py-2.5 px-3">Área del Departamento</th>
                     <th className="py-2.5 px-3 w-36 text-center">Porcentaje (%)</th>
                     <th className="py-2.5 px-3 w-48 text-right">Monto Asignado ($)</th>
-                    <th className="py-2.5 px-3 w-36 text-right">Total Gastado</th>
+                    <th className="py-2.5 px-3 w-40 text-right">Total Gastado</th>
                     <th className="py-2.5 px-3 w-36 text-right">Saldo Restante</th>
                   </tr>
                 </thead>
@@ -478,7 +568,12 @@ export default function Settings({
                       </td>
 
                       <td className="py-2.5 px-3 text-right font-semibold text-emerald-800">
-                        {formatCurrency(alloc.total_spent)}
+                        <div>{formatCurrency(alloc.total_spent)}</div>
+                        {(alloc.viaticos_spent > 0 || alloc.compras_spent > 0) && (
+                          <div className="text-[10px] text-slate-500 font-normal">
+                            C: {formatCurrency(alloc.compras_spent)} | V: {formatCurrency(alloc.viaticos_spent)}
+                          </div>
+                        )}
                       </td>
 
                       <td className="py-2.5 px-3 text-right font-black text-slate-900">

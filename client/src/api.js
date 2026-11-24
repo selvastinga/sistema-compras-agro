@@ -236,6 +236,40 @@ export const api = {
     });
   },
 
+  // Viaticos
+  getViaticos: async (filters = {}) => {
+    try {
+      const params = new URLSearchParams();
+      if (filters.year) params.append('year', filters.year);
+      if (filters.area_id) params.append('area_id', filters.area_id);
+      if (filters.search) params.append('search', filters.search);
+      const data = await fetchJson(`${API_BASE}/viaticos?${params.toString()}`);
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
+  },
+  createViatico: async (data) => {
+    return fetchJson(`${API_BASE}/viaticos`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+  },
+  updateViatico: async (id, data) => {
+    return fetchJson(`${API_BASE}/viaticos/${id}`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(data)
+    });
+  },
+  deleteViatico: async (id) => {
+    return fetchJson(`${API_BASE}/viaticos/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+  },
+
   // Stats
   getStats: async (year) => {
     try {

@@ -4,6 +4,7 @@ import Dashboard from './components/Dashboard';
 import RequestForm from './components/RequestForm';
 import RequestsList from './components/RequestsList';
 import PurchasesView from './components/PurchasesView';
+import ViaticosView from './components/ViaticosView';
 import OfficialFichaPrint from './components/OfficialFichaPrint';
 import PurchaseModal from './components/PurchaseModal';
 import Settings from './components/Settings';
@@ -17,6 +18,7 @@ export default function App() {
   const [areas, setAreas] = useState([]);
   const [rubros, setRubros] = useState([]);
   const [requests, setRequests] = useState([]);
+  const [viaticos, setViaticos] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -75,15 +77,17 @@ export default function App() {
     }
   };
 
-  // Load Year-specific data (requests & stats)
+  // Load Year-specific data (requests, viaticos & stats)
   const loadYearData = async (year) => {
     try {
       setLoading(true);
-      const [reqsData, statsData] = await Promise.all([
+      const [reqsData, viaticosData, statsData] = await Promise.all([
         api.getRequests({ year }),
+        api.getViaticos({ year }),
         api.getStats(year)
       ]);
       setRequests(reqsData || []);
+      setViaticos(viaticosData || []);
       setStats(statsData || null);
     } catch (err) {
       console.error('Error loading year data:', err);
@@ -252,15 +256,27 @@ export default function App() {
               />
             )}
 
+            {/* View 4B: Viaticos Management */}
+            {activeTab === 'viaticos' && (
+              <ViaticosView
+                viaticos={viaticos}
+                areas={areas}
+                selectedYear={selectedYear}
+                onRefresh={refreshAll}
+                currentUser={currentUser}
+                onOpenAuthModal={() => setShowAuthModal(true)}
+              />
+            )}
+
             {/* View 5: Settings & Parametrization */}
             {activeTab === 'settings' && (
               <Settings
                 areas={areas}
                 rubros={rubros}
                 selectedYear={selectedYear}
-                onRefreshAreas={loadInitialData}
-                onRefreshRubros={loadInitialData}
-                onRefreshYears={loadInitialData}
+                onRefreshAreas={refreshAll}
+                onRefreshRubros={refreshAll}
+                onRefreshYears={refreshAll}
                 currentUser={currentUser}
                 onOpenAuthModal={() => setShowAuthModal(true)}
               />

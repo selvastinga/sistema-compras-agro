@@ -169,6 +169,9 @@ router.get('/years', async (req, res) => {
       SELECT 
         y.year,
         CAST(y.initial_budget AS FLOAT) as initial_budget,
+        COALESCE(CAST(y.presupuesto_base AS FLOAT), 0) as presupuesto_base,
+        COALESCE(CAST(y.partida_especial AS FLOAT), 0) as partida_especial,
+        COALESCE(CAST(y.remanente_anterior AS FLOAT), 0) as remanente_anterior,
         y.description,
         y.is_active,
         COALESCE(CAST((
@@ -176,7 +179,12 @@ router.get('/years', async (req, res) => {
           FROM request_items ri
           JOIN purchase_requests pr ON ri.request_id = pr.id
           WHERE pr.year = y.year AND ri.estado_item = 'Comprado'
-        ) AS FLOAT), 0) as total_spent,
+        ) AS FLOAT), 0) as compras_spent,
+        COALESCE(CAST((
+          SELECT SUM(v.monto)
+          FROM viaticos v
+          WHERE v.year = y.year
+        ) AS FLOAT), 0) as viaticos_spent,
         COALESCE(CAST((
           SELECT SUM(ri.precio_estimado_total)
           FROM request_items ri
@@ -193,11 +201,22 @@ router.get('/years', async (req, res) => {
     `);
 
     const result = (years || []).map(y => {
-      const initBudget = parseFloat(y.initial_budget) || 0;
-      const spent = parseFloat(y.total_spent) || 0;
+      const pBase = parseFloat(y.presupuesto_base) || 0;
+      const pEspecial = parseFloat(y.partida_especial) || 0;
+      const pRemanente = parseFloat(y.remanente_anterior) || 0;
+      const sumThree = pBase + pEspecial + pRemanente;
+      const initBudget = sumThree > 0 ? sumThree : (parseFloat(y.initial_budget) || 0);
+      const comprasSpent = parseFloat(y.compras_spent) || 0;
+      const viaticosSpent = parseFloat(y.viaticos_spent) || 0;
+      const spent = comprasSpent + viaticosSpent;
       return {
         ...y,
+        presupuesto_base: pBase || initBudget,
+        partida_especial: pEspecial,
+        remanente_anterior: pRemanente,
         initial_budget: initBudget,
+        compras_spent: comprasSpent,
+        viaticos_spent: viaticosSpent,
         total_spent: spent,
         remaining_budget: initBudget - spent,
         spent_percentage: initBudget > 0 ? (spent / initBudget) * 100 : 0
@@ -214,7 +233,7 @@ router.get('/years', async (req, res) => {
 // POST /years (ADMIN ONLY)
 router.post('/years', requireAdminAuth, async (req, res) => {
   try {
-    const { year, initial_budget, description } = req.body;
+    const { year, initial_budget, presupuesto_base, partida_especial, remanente_anterior, description } = req.body;
     if (!year || isNaN(year)) {
       return res.status(400).json({ error: 'Año inválido' });
     }
@@ -224,11 +243,15 @@ router.post('/years', requireAdminAuth, async (req, res) => {
       return res.status(400).json({ error: `El ejercicio fiscal ${year} ya existe` });
     }
 
-    const budget = parseFloat(initial_budget) || 0;
+    const pBase = presupuesto_base !== undefined ? (parseFloat(presupuesto_base) || 0) : (parseFloat(initial_budget) || 0);
+    const pEspecial = parseFloat(partida_especial) || 0;
+    const pRemanente = parseFloat(remanente_anterior) || 0;
+    const budget = pBase + pEspecial + pRemanente;
+
     await execute(`
-      INSERT INTO fiscal_years (year, initial_budget, description, is_active)
-      VALUES (?, ?, ?, 1)
-    `, [year, budget, description || `Presupuesto Anual ${year}`]);
+      INSERT INTO fiscal_years (year, initial_budget, presupuesto_base, partida_especial, remanente_anterior, description, is_active)
+      VALUES (?, ?, ?, ?, ?, ?, 1)
+    `, [year, budget, pBase, pEspecial, pRemanente, description || `Presupuesto Anual ${year}`]);
 
     // Create default area allocations
     const activeAreas = await query('SELECT id FROM areas WHERE is_active = 1');
@@ -254,11 +277,19 @@ router.post('/years', requireAdminAuth, async (req, res) => {
 router.put('/years/:year', requireAdminAuth, async (req, res) => {
   try {
     const year = parseInt(req.params.year, 10);
-    const { initial_budget, description, is_active } = req.body;
+    const { initial_budget, presupuesto_base, partida_especial, remanente_anterior, description, is_active } = req.body;
 
-    if (initial_budget !== undefined) {
-      const budget = parseFloat(initial_budget) || 0;
-      await execute('UPDATE fiscal_years SET initial_budget = ?, description = COALESCE(?, description), updated_at = CURRENT_TIMESTAMP WHERE year = ?', [budget, description, year]);
+    if (initial_budget !== undefined || presupuesto_base !== undefined || partida_especial !== undefined || remanente_anterior !== undefined) {
+      const existing = await queryRow('SELECT * FROM fiscal_years WHERE year = ?', [year]);
+      const pBase = presupuesto_base !== undefined ? (parseFloat(presupuesto_base) || 0) : (initial_budget !== undefined ? (parseFloat(initial_budget) || 0) : (parseFloat(existing?.presupuesto_base) || 0));
+      const pEspecial = partida_especial !== undefined ? (parseFloat(partida_especial) || 0) : (parseFloat(existing?.partida_especial) || 0);
+      const pRemanente = remanente_anterior !== undefined ? (parseFloat(remanente_anterior) || 0) : (parseFloat(existing?.remanente_anterior) || 0);
+      const budget = pBase + pEspecial + pRemanente;
+
+      await execute(
+        'UPDATE fiscal_years SET initial_budget = ?, presupuesto_base = ?, partida_especial = ?, remanente_anterior = ?, description = COALESCE(?, description), updated_at = CURRENT_TIMESTAMP WHERE year = ?',
+        [budget, pBase, pEspecial, pRemanente, description, year]
+      );
       
       const allocations = await query('SELECT area_id, percentage FROM area_budgets WHERE year = ?', [year]);
       for (const a of (allocations || [])) {
@@ -285,8 +316,8 @@ router.get('/budgets', async (req, res) => {
     let yearInfo = await queryRow('SELECT * FROM fiscal_years WHERE year = ?', [year]);
     if (!yearInfo) {
       // Create year automatically if missing
-      await execute('INSERT INTO fiscal_years (year, initial_budget, description, is_active) VALUES (?, 0, ?, 1) ON CONFLICT (year) DO NOTHING', [year, `Presupuesto Anual ${year}`]);
-      yearInfo = { year, initial_budget: 0, description: `Presupuesto Anual ${year}`, is_active: 1 };
+      await execute('INSERT INTO fiscal_years (year, initial_budget, presupuesto_base, partida_especial, remanente_anterior, description, is_active) VALUES (?, 0, 0, 0, 0, ?, 1) ON CONFLICT (year) DO NOTHING', [year, `Presupuesto Anual ${year}`]);
+      yearInfo = { year, initial_budget: 0, presupuesto_base: 0, partida_especial: 0, remanente_anterior: 0, description: `Presupuesto Anual ${year}`, is_active: 1 };
     }
 
     // Ensure all active areas have a record in area_budgets
@@ -313,7 +344,12 @@ router.get('/budgets', async (req, res) => {
           FROM request_items ri
           JOIN purchase_requests pr ON ri.request_id = pr.id
           WHERE pr.year = ab.year AND pr.area_id = ab.area_id AND ri.estado_item = 'Comprado'
-        ) AS FLOAT), 0) as total_spent,
+        ) AS FLOAT), 0) as compras_spent,
+        COALESCE(CAST((
+          SELECT SUM(v.monto)
+          FROM viaticos v
+          WHERE v.year = ab.year AND v.area_id = ab.area_id
+        ) AS FLOAT), 0) as viaticos_spent,
         COALESCE(CAST((
           SELECT SUM(ri.precio_estimado_total)
           FROM request_items ri
@@ -333,13 +369,17 @@ router.get('/budgets', async (req, res) => {
 
     const enriched = (allocations || []).map(a => {
       const allocated = parseFloat(a.allocated_amount) || 0;
-      const spent = parseFloat(a.total_spent) || 0;
+      const comprasSpent = parseFloat(a.compras_spent) || 0;
+      const viaticosSpent = parseFloat(a.viaticos_spent) || 0;
+      const spent = comprasSpent + viaticosSpent;
       const remaining = allocated - spent;
       const spent_pct = allocated > 0 ? (spent / allocated) * 100 : 0;
       const remaining_pct = allocated > 0 ? (remaining / allocated) * 100 : 0;
       return {
         ...a,
         allocated_amount: allocated,
+        compras_spent: comprasSpent,
+        viaticos_spent: viaticosSpent,
         total_spent: spent,
         remaining_balance: remaining,
         spent_percentage: spent_pct,
@@ -347,19 +387,37 @@ router.get('/budgets', async (req, res) => {
       };
     });
 
-    const initBudget = parseFloat(yearInfo.initial_budget) || 0;
+    const pBase = parseFloat(yearInfo.presupuesto_base) || 0;
+    const pEspecial = parseFloat(yearInfo.partida_especial) || 0;
+    const pRemanente = parseFloat(yearInfo.remanente_anterior) || 0;
+    const sumThree = pBase + pEspecial + pRemanente;
+    const initBudget = sumThree > 0 ? sumThree : (parseFloat(yearInfo.initial_budget) || 0);
+
     const totalAllocated = enriched.reduce((sum, a) => sum + a.allocated_amount, 0);
     const totalPercentage = enriched.reduce((sum, a) => sum + (parseFloat(a.percentage) || 0), 0);
-    const totalSpent = enriched.reduce((sum, a) => sum + a.total_spent, 0);
+    const totalComprasSpent = enriched.reduce((sum, a) => sum + a.compras_spent, 0);
+    const totalViaticosSpent = enriched.reduce((sum, a) => sum + a.viaticos_spent, 0);
+    const totalSpent = totalComprasSpent + totalViaticosSpent;
     const totalPending = enriched.reduce((sum, a) => sum + (parseFloat(a.total_pending_estimated) || 0), 0);
 
     res.json({
-      year: { ...yearInfo, initial_budget: initBudget },
+      year: {
+        ...yearInfo,
+        presupuesto_base: pBase || initBudget,
+        partida_especial: pEspecial,
+        remanente_anterior: pRemanente,
+        initial_budget: initBudget
+      },
       allocations: enriched,
       totals: {
         department_budget: initBudget,
+        presupuesto_base: pBase || initBudget,
+        partida_especial: pEspecial,
+        remanente_anterior: pRemanente,
         total_allocated: totalAllocated,
         total_percentage: totalPercentage,
+        compras_spent: totalComprasSpent,
+        viaticos_spent: totalViaticosSpent,
         total_spent: totalSpent,
         total_pending_estimated: totalPending,
         department_remaining: initBudget - totalSpent,
@@ -376,18 +434,32 @@ router.get('/budgets', async (req, res) => {
 router.put('/budgets/:year', requireAdminAuth, async (req, res) => {
   try {
     const year = parseInt(req.params.year, 10);
-    const { initial_budget, allocations } = req.body;
+    const { initial_budget, presupuesto_base, partida_especial, remanente_anterior, allocations } = req.body;
 
-    const yearInfo = await queryRow('SELECT initial_budget FROM fiscal_years WHERE year = ?', [year]);
+    const yearInfo = await queryRow('SELECT * FROM fiscal_years WHERE year = ?', [year]);
     if (!yearInfo) {
       return res.status(404).json({ error: 'Ejercicio fiscal no encontrado' });
     }
 
-    const currentTotalBudget = initial_budget !== undefined ? parseFloat(initial_budget) : parseFloat(yearInfo.initial_budget);
+    const hasThreeSources = presupuesto_base !== undefined || partida_especial !== undefined || remanente_anterior !== undefined;
+    const pBase = hasThreeSources
+      ? (parseFloat(presupuesto_base) || 0)
+      : (initial_budget !== undefined ? (parseFloat(initial_budget) || 0) : (parseFloat(yearInfo.presupuesto_base) || 0));
+    const pEspecial = hasThreeSources
+      ? (parseFloat(partida_especial) || 0)
+      : (parseFloat(yearInfo.partida_especial) || 0);
+    const pRemanente = hasThreeSources
+      ? (parseFloat(remanente_anterior) || 0)
+      : (parseFloat(yearInfo.remanente_anterior) || 0);
 
-    if (initial_budget !== undefined) {
-      await execute('UPDATE fiscal_years SET initial_budget = ? WHERE year = ?', [currentTotalBudget, year]);
-    }
+    const currentTotalBudget = hasThreeSources
+      ? (pBase + pEspecial + pRemanente)
+      : (initial_budget !== undefined ? (parseFloat(initial_budget) || 0) : (parseFloat(yearInfo.initial_budget) || 0));
+
+    await execute(
+      'UPDATE fiscal_years SET initial_budget = ?, presupuesto_base = ?, partida_especial = ?, remanente_anterior = ?, updated_at = CURRENT_TIMESTAMP WHERE year = ?',
+      [currentTotalBudget, pBase, pEspecial, pRemanente, year]
+    );
 
     if (Array.isArray(allocations)) {
       for (const item of allocations) {
@@ -1100,6 +1172,148 @@ router.post('/requests/:id/purchase-all', requireAdminAuth, async (req, res) => 
 });
 
 // ==========================================
+// 5B. VIATICOS MANAGEMENT
+// ==========================================
+
+// GET /viaticos (PUBLIC)
+router.get('/viaticos', async (req, res) => {
+  try {
+    const { year, area_id, search } = req.query;
+    let queryStr = `
+      SELECT 
+        v.*,
+        CAST(v.monto AS FLOAT) as monto,
+        CAST(v.dias AS FLOAT) as dias,
+        a.name as area_name,
+        a.code as area_code,
+        a.color as area_color
+      FROM viaticos v
+      JOIN areas a ON v.area_id = a.id
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (year) {
+      queryStr += ' AND v.year = ?';
+      params.push(parseInt(year, 10));
+    }
+    if (area_id) {
+      queryStr += ' AND v.area_id = ?';
+      params.push(parseInt(area_id, 10));
+    }
+    if (search && search.trim()) {
+      queryStr += ' AND (v.docente LIKE ? OR v.destino LIKE ? OR v.observaciones LIKE ?)';
+      const s = `%${search.trim()}%`;
+      params.push(s, s, s);
+    }
+
+    queryStr += ' ORDER BY v.fecha DESC, v.id DESC';
+    const rows = await query(queryStr, params);
+    res.json(rows || []);
+  } catch (error) {
+    console.error('Error fetching viaticos:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /viaticos (ADMIN ONLY)
+router.post('/viaticos', requireAdminAuth, async (req, res) => {
+  try {
+    const { year, area_id, docente, destino, dias, monto, fecha, observaciones } = req.body;
+    if (!docente || !docente.trim()) {
+      return res.status(400).json({ error: 'El nombre del docente es obligatorio' });
+    }
+    if (!area_id) {
+      return res.status(400).json({ error: 'El área del docente es obligatoria' });
+    }
+    if (!destino || !destino.trim()) {
+      return res.status(400).json({ error: 'El destino es obligatorio' });
+    }
+
+    const vYear = parseInt(year, 10) || new Date().getFullYear();
+    const vMonto = parseFloat(monto) || 0;
+    const vDias = parseFloat(dias) || 1;
+    const vFecha = fecha || new Date().toISOString().split('T')[0];
+
+    const info = await executeInsert(`
+      INSERT INTO viaticos (year, area_id, docente, destino, dias, monto, fecha, observaciones)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `, [vYear, parseInt(area_id, 10), docente.trim(), destino.trim(), vDias, vMonto, vFecha, observaciones || '']);
+
+    const created = await queryRow(`
+      SELECT v.*, a.name as area_name, a.code as area_code, a.color as area_color
+      FROM viaticos v
+      JOIN areas a ON v.area_id = a.id
+      WHERE v.id = ?
+    `, [info.lastInsertRowid]);
+
+    res.json({ message: 'Viático registrado exitosamente', viatico: created });
+  } catch (error) {
+    console.error('Error creating viatico:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /viaticos/:id (ADMIN ONLY)
+router.put('/viaticos/:id', requireAdminAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { area_id, docente, destino, dias, monto, fecha, observaciones } = req.body;
+
+    const existing = await queryRow('SELECT * FROM viaticos WHERE id = ?', [id]);
+    if (!existing) {
+      return res.status(404).json({ error: 'Viático no encontrado' });
+    }
+
+    await execute(`
+      UPDATE viaticos SET
+        area_id = COALESCE(?, area_id),
+        docente = COALESCE(?, docente),
+        destino = COALESCE(?, destino),
+        dias = COALESCE(?, dias),
+        monto = COALESCE(?, monto),
+        fecha = COALESCE(?, fecha),
+        observaciones = COALESCE(?, observaciones),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `, [
+      area_id ? parseInt(area_id, 10) : null,
+      docente ? docente.trim() : null,
+      destino ? destino.trim() : null,
+      dias !== undefined ? parseFloat(dias) : null,
+      monto !== undefined ? parseFloat(monto) : null,
+      fecha || null,
+      observaciones !== undefined ? observaciones : null,
+      id
+    ]);
+
+    const updated = await queryRow(`
+      SELECT v.*, a.name as area_name, a.code as area_code, a.color as area_color
+      FROM viaticos v
+      JOIN areas a ON v.area_id = a.id
+      WHERE v.id = ?
+    `, [id]);
+
+    res.json({ message: 'Viático actualizado exitosamente', viatico: updated });
+  } catch (error) {
+    console.error('Error updating viatico:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /viaticos/:id (ADMIN ONLY)
+router.delete('/viaticos/:id', requireAdminAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    await execute('DELETE FROM viaticos WHERE id = ?', [id]);
+    res.json({ message: 'Viático eliminado exitosamente' });
+  } catch (error) {
+    console.error('Error deleting viatico:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
 // 6. STATS & ANALYTICS DASHBOARD (PUBLIC)
 // ==========================================
 
@@ -1109,7 +1323,7 @@ router.get('/stats', async (req, res) => {
 
     let yearData = await queryRow('SELECT * FROM fiscal_years WHERE year = ?', [year]);
     if (!yearData) {
-      yearData = { year, initial_budget: 0, description: `Presupuesto Anual ${year}`, is_active: 1 };
+      yearData = { year, initial_budget: 0, presupuesto_base: 0, partida_especial: 0, remanente_anterior: 0, description: `Presupuesto Anual ${year}`, is_active: 1 };
     }
 
     // 1. By Rubro stats
@@ -1130,7 +1344,7 @@ router.get('/stats', async (req, res) => {
       ORDER BY total_gastado DESC, total_estimado DESC
     `, [year]);
 
-    // 2. By Area stats
+    // 2. By Area stats (including both purchases and viaticos)
     const areaStats = await query(`
       SELECT 
         a.id as area_id,
@@ -1139,25 +1353,50 @@ router.get('/stats', async (req, res) => {
         a.color as area_color,
         COALESCE(CAST(ab.percentage AS FLOAT), 0) as percentage,
         COALESCE(CAST(ab.allocated_amount AS FLOAT), 0) as allocated_amount,
-        COALESCE(CAST(SUM(CASE WHEN ri.estado_item = 'Comprado' THEN ri.precio_real_total ELSE 0 END) AS FLOAT), 0) as total_gastado,
-        COALESCE(CAST(SUM(CASE WHEN ri.estado_item = 'Pendiente' THEN ri.precio_estimado_total ELSE 0 END) AS FLOAT), 0) as total_pendiente,
-        COUNT(DISTINCT pr.id) as total_pedidos
+        COALESCE(CAST((
+          SELECT SUM(ri.precio_real_total)
+          FROM request_items ri
+          JOIN purchase_requests pr ON ri.request_id = pr.id
+          WHERE pr.year = ? AND pr.area_id = a.id AND ri.estado_item = 'Comprado'
+        ) AS FLOAT), 0) as compras_gastado,
+        COALESCE(CAST((
+          SELECT SUM(v.monto)
+          FROM viaticos v
+          WHERE v.year = ? AND v.area_id = a.id
+        ) AS FLOAT), 0) as viaticos_gastado,
+        COALESCE(CAST((
+          SELECT SUM(ri.precio_estimado_total)
+          FROM request_items ri
+          JOIN purchase_requests pr ON ri.request_id = pr.id
+          WHERE pr.year = ? AND pr.area_id = a.id AND ri.estado_item = 'Pendiente'
+        ) AS FLOAT), 0) as total_pendiente,
+        COALESCE((
+          SELECT COUNT(DISTINCT pr.id)
+          FROM purchase_requests pr
+          WHERE pr.year = ? AND pr.area_id = a.id
+        ), 0) as total_pedidos,
+        COALESCE((
+          SELECT COUNT(v.id)
+          FROM viaticos v
+          WHERE v.year = ? AND v.area_id = a.id
+        ), 0) as total_viaticos
       FROM areas a
       LEFT JOIN area_budgets ab ON ab.area_id = a.id AND ab.year = ?
-      LEFT JOIN purchase_requests pr ON pr.area_id = a.id AND pr.year = ?
-      LEFT JOIN request_items ri ON ri.request_id = pr.id
       WHERE a.is_active = 1
-      GROUP BY a.id, a.name, a.code, a.color, ab.percentage, ab.allocated_amount, a.display_order
       ORDER BY a.display_order ASC, a.name ASC
-    `, [year, year]);
+    `, [year, year, year, year, year, year]);
 
     const enrichedAreas = (areaStats || []).map(a => {
       const allocated = parseFloat(a.allocated_amount) || 0;
-      const spent = parseFloat(a.total_gastado) || 0;
+      const comprasSpent = parseFloat(a.compras_gastado) || 0;
+      const viaticosSpent = parseFloat(a.viaticos_gastado) || 0;
+      const spent = comprasSpent + viaticosSpent;
       const pending = parseFloat(a.total_pendiente) || 0;
       return {
         ...a,
         allocated_amount: allocated,
+        compras_gastado: comprasSpent,
+        viaticos_gastado: viaticosSpent,
         total_gastado: spent,
         total_pendiente: pending,
         remaining_balance: allocated - spent,
@@ -1188,16 +1427,36 @@ router.get('/stats', async (req, res) => {
       GROUP BY pr.estado
     `, [year]);
 
-    // 5. General Totals
-    const initialBudget = parseFloat(yearData.initial_budget) || 0;
-    const totalSpent = enrichedAreas.reduce((sum, a) => sum + a.total_gastado, 0);
+    // 5. General Totals (3 budget sources + purchases + viaticos)
+    const pBase = parseFloat(yearData.presupuesto_base) || 0;
+    const pEspecial = parseFloat(yearData.partida_especial) || 0;
+    const pRemanente = parseFloat(yearData.remanente_anterior) || 0;
+    const sumThree = pBase + pEspecial + pRemanente;
+    const initialBudget = sumThree > 0 ? sumThree : (parseFloat(yearData.initial_budget) || 0);
+
+    const totalComprasSpent = enrichedAreas.reduce((sum, a) => sum + a.compras_gastado, 0);
+    const totalViaticosSpent = enrichedAreas.reduce((sum, a) => sum + a.viaticos_gastado, 0);
+    const totalViaticosCount = enrichedAreas.reduce((sum, a) => sum + (parseInt(a.total_viaticos, 10) || 0), 0);
+    const totalSpent = totalComprasSpent + totalViaticosSpent;
     const totalPending = enrichedAreas.reduce((sum, a) => sum + a.total_pendiente, 0);
     const remainingDept = initialBudget - totalSpent;
 
     res.json({
-      year: { ...yearData, initial_budget: initialBudget },
+      year: {
+        ...yearData,
+        presupuesto_base: pBase || initialBudget,
+        partida_especial: pEspecial,
+        remanente_anterior: pRemanente,
+        initial_budget: initialBudget
+      },
       summary: {
         initial_budget: initialBudget,
+        presupuesto_base: pBase || initialBudget,
+        partida_especial: pEspecial,
+        remanente_anterior: pRemanente,
+        compras_spent: totalComprasSpent,
+        viaticos_spent: totalViaticosSpent,
+        total_viaticos_count: totalViaticosCount,
         total_spent: totalSpent,
         remaining_budget: remainingDept,
         total_pending_estimated: totalPending,

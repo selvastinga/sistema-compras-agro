@@ -30,6 +30,12 @@ export default function Dashboard({
 
   const summary = stats?.summary || {
     initial_budget: 0,
+    presupuesto_base: 0,
+    partida_especial: 0,
+    remanente_anterior: 0,
+    compras_spent: 0,
+    viaticos_spent: 0,
+    total_viaticos_count: 0,
     total_spent: 0,
     remaining_budget: 0,
     total_pending_estimated: 0,
@@ -74,7 +80,7 @@ export default function Dashboard({
             Control en tiempo real de fondos asignados, gastos efectuados por área y rubro, y disponibilidad presupuestaria departamental.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={() => onNavigateTab('new-request')}
             className="bg-white hover:bg-emerald-50 text-emerald-900 font-bold px-4 py-2.5 rounded-xl shadow transition-all hover:scale-105 text-sm flex items-center gap-2"
@@ -82,33 +88,51 @@ export default function Dashboard({
             <ArrowUpRight className="w-4 h-4 text-emerald-700" />
             Cargar Nuevo Pedido
           </button>
+          <button
+            onClick={() => onNavigateTab('viaticos')}
+            className="bg-emerald-700 hover:bg-emerald-600 text-white border border-emerald-500/50 font-bold px-4 py-2.5 rounded-xl shadow transition-all hover:scale-105 text-sm flex items-center gap-2"
+          >
+            <ArrowUpRight className="w-4 h-4 text-emerald-200" />
+            Cargar Viático
+          </button>
         </div>
       </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
-        {/* Presupuesto Total */}
+        {/* Presupuesto Total (Suma de las 3 partidas) */}
         <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Presupuesto Inicial
+              Presupuesto Total
             </span>
             <div className="p-2 bg-blue-50 text-blue-700 rounded-xl">
               <DollarSign className="w-5 h-5" />
             </div>
           </div>
-          <div className="mt-3">
+          <div className="mt-2">
             <div className="text-2xl font-black text-slate-900">
               {formatCurrency(summary.initial_budget)}
             </div>
-            <p className="text-xs text-slate-500 mt-1 font-medium">
-              Fondo Anual Departamental
-            </p>
+            <div className="mt-2 pt-2 border-t border-slate-100 space-y-1 text-[11px] text-slate-600">
+              <div className="flex justify-between">
+                <span>• Presup. Inicial:</span>
+                <strong className="text-slate-800">{formatCurrency(summary.presupuesto_base)}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>• Partida Especial:</span>
+                <strong className="text-slate-800">{formatCurrency(summary.partida_especial)}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>• Remanente Ant.:</span>
+                <strong className="text-slate-800">{formatCurrency(summary.remanente_anterior)}</strong>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Total Gastado / Comprado */}
+        {/* Total Gastado (Compras + Viáticos) */}
         <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-xs hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -118,11 +142,11 @@ export default function Dashboard({
               <TrendingUp className="w-5 h-5" />
             </div>
           </div>
-          <div className="mt-3">
+          <div className="mt-2">
             <div className="text-2xl font-black text-emerald-700">
               {formatCurrency(summary.total_spent)}
             </div>
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center gap-2 mt-1.5">
               <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
                 <div 
                   className="bg-emerald-600 h-1.5 rounded-full transition-all duration-500" 
@@ -132,6 +156,16 @@ export default function Dashboard({
               <span className="text-xs font-bold text-emerald-800 whitespace-nowrap">
                 {summary.execution_rate.toFixed(1)}%
               </span>
+            </div>
+            <div className="mt-2 pt-2 border-t border-slate-100 space-y-1 text-[11px] text-slate-600">
+              <div className="flex justify-between">
+                <span>• En Compras:</span>
+                <strong className="text-slate-800">{formatCurrency(summary.compras_spent)}</strong>
+              </div>
+              <div className="flex justify-between">
+                <span>• En Viáticos ({summary.total_viaticos_count || 0}):</span>
+                <strong className="text-slate-800">{formatCurrency(summary.viaticos_spent)}</strong>
+              </div>
             </div>
           </div>
         </div>
@@ -236,7 +270,7 @@ export default function Dashboard({
                             {area.area_name}
                           </h4>
                           <span className="text-xs text-slate-500">
-                            {area.total_pedidos} pedido(s) cargado(s)
+                            {area.total_pedidos || 0} pedido(s) • {area.total_viaticos || 0} viático(s)
                           </span>
                         </div>
                       </div>
@@ -248,6 +282,11 @@ export default function Dashboard({
                           </div>
                           <div className="text-xs text-slate-500 font-medium">
                             Gastado: <strong className="text-emerald-700">{formatCurrency(area.total_gastado)}</strong>
+                            {(area.viaticos_gastado > 0 || area.compras_gastado > 0) && (
+                              <span className="text-[10px] text-slate-400 ml-1">
+                                (C: {formatCurrency(area.compras_gastado)} | V: {formatCurrency(area.viaticos_gastado)})
+                              </span>
+                            )}
                           </div>
                         </div>
                         <div className="pl-3 border-l border-slate-200">
